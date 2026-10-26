@@ -1,0 +1,12 @@
+name: dilaya/aws-region-edge
+version: 0.1.0
+description: "The Dilaya region router's Lambda@Edge (origin-request, Région Canada t_rca_p1_router), in a us-east-1 stack of its own: Lambda@Edge must live in us-east-1 while dilaya/aws-mcp-connector-lambda deploys one stack in its pod's region. Routes a bearer whose orgs sit in different regions by params.arguments.org of the JSON-RPC body (bounded read; anything else → home region). Origins are baked into the inline code at synth. Output EdgeVersionArn (a numbered version ARN) feeds the deploy package's regionRouterEdgeVersionArn."
+visibility: private
+iac: cdk
+infra: aws
+parameters:
+  # ⚠️ hereya cuts a -p at every "=": origins use ":" between region and host.
+  # A -p only reaches this package if DECLARED here — undeclared, it is dropped in silence.
+  regionRouterOrigins:
+    description: "Comma-separated <region>:<origin host> pairs, e.g. eu-west-1:app-eu.dilaya.eu,ca-central-1:app-ca.dilaya.eu — the FIRST is the home region (unknown org, no bearer, unroutable body). Each host is a pod's own originDomain, never a public name. Must list the same origins as the deploy package's regionRouterOrigins."
+    mandatory: true
