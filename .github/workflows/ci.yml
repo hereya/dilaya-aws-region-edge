@@ -1,0 +1,65 @@
+name: CI
+
+# Pre-merge guard: `publish.yml` only runs on a release, so nothing else reads a PR.
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+      - "!main"
+
+permissions:
+  contents: read
+
+jobs:
+  enforce-line-limit:
+    # Le seuil des 220 lignes, arrêté par Jonatan et répliqué depuis hereya-cloud :
+    # l'ARBRE ENTIER est balayé, pas seulement les fichiers modifiés.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Aucun fichier .ts/.tsx au-dessus de 220 lignes
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            lines=$(wc -l < "$f" | tr -d " ")
+            if [ "$lines" -gt 220 ]; then
+              echo "::error file=$f,line=221::$f fait $lines lignes, la limite est 220."
+              fail=1
+            fi
+          done < <(git ls-files '*.ts' '*.tsx')
+          if [ "$fail" -eq 0 ]; then
+            echo "OK — $(git ls-files "*.ts" "*.tsx" | wc -l | tr -d " ") fichiers, aucun au-dessus de 220 lignes."
+          fi
+          exit $fail
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: cdk synth (sample origins) — ONE stack, in us-east-1, with the EdgeVersionArn output
+        env:
+          regionRouterOrigins: eu-west-1:app-eu.dilaya.eu,ca-central-1:app-ca.dilaya.eu
+          STACK_NAME: ci-region-edge
+          CDK_DEFAULT_ACCOUNT: "123456789012"
+        run: |
+          set -euo pipefail
+          npx cdk synth -q
+          node -e '
+            const m = require("./cdk.out/manifest.json");
+            const stacks = Object.values(m.artifacts).filter((a) => a.type === "aws:cloudformation:stack");
+            if (stacks.length !== 1) throw new Error(`expected ONE stack, got ${stacks.length}`);
+            if (!stacks[0].environment.endsWith("/us-east-1")) throw new Error(`stack not in us-east-1: ${stacks[0].environment}`);
+            const t = require("./cdk.out/ci-region-edge.template.json");
+            if (!t.Outputs || !t.Outputs.EdgeVersionArn) throw new Error("no EdgeVersionArn output");
+            console.log("OK:", stacks[0].environment, Object.keys(t.Resources).join(", "));
+          '
